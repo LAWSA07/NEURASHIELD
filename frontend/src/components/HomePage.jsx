@@ -84,7 +84,7 @@ const SplineLoader = () => (
 
 const HomePage = () => {
   return (
-    <div className="relative min-h-screen bg-[#0B0B0F] text-white overflow-x-hidden pt-16">
+    <div className="relative min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white overflow-x-hidden pt-16">
       {/* Spline Background */}
       {Spline && (
         <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-screen h-screen pointer-events-none z-[1]">
@@ -109,39 +109,39 @@ const HomePage = () => {
               className="text-center md:text-left"
             >
               <h1 className="text-6xl md:text-8xl lg:text-[9rem] xl:text-[11rem] leading-[0.9] tracking-tight text-white mb-6 uppercase font-bold">
-                CYBER
+                EDGE
                 <br />
-                <span className="text-red-500">SHIELD</span>
+                <span className="text-red-500">SENTINEL</span>
               </h1>
               <p className="text-xl md:text-2xl mb-8 text-gray-300">
-                AI Detection Available Now
+                Advanced Cybersecurity Threat Detection
               </p>
               <div className="flex flex-col md:flex-row items-center md:items-start gap-8 justify-center md:justify-start">
                 <Link 
                   to="/auth" 
-                  className="px-4 py-2 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors text-md font-medium"
+                  className="btn-red-primary text-lg px-8 py-4"
                 >
                   Try Now
                 </Link>
                 <Link 
-                  to="/network" 
-                  className="px-4 py-2 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors text-md font-medium"
+                  to="/dashboard" 
+                  className="btn-red-outline text-lg px-8 py-4"
                 >
-                  Demo
+                  Enhanced Dashboard
                 </Link>
                 <div className="text-white/70 text-base font-light tracking-wide">
-                  State-of-the-art deep learning model
+                  AI-powered threat detection system
                 </div>
               </div>
             </motion.div>
           </div>
         </section>
 
-        {/* Features Section (Only show on larger screens or when scrolled) */}
-        <section className="py-20 px-6 md:px-12 bg-black/30 backdrop-blur-sm hidden md:block">
+        {/* Features Section */}
+        <section className="py-20 px-6 md:px-12">
           <div className="max-w-6xl mx-auto">
             <motion.h2 
-              className="text-4xl font-bold mb-16 text-center"
+              className="text-4xl font-bold mb-16 text-center text-white"
               initial={{ opacity: 0 }}
               whileInView={{ opacity: 1 }}
               viewport={{ once: true }}
@@ -152,17 +152,64 @@ const HomePage = () => {
               {features.map((feature, index) => (
                 <motion.div
                   key={index}
-                  className="bg-white/5 backdrop-blur-sm p-8 rounded-xl hover:bg-white/10 transition-all duration-300"
+                  className="card card-hover"
                   initial={{ opacity: 0, y: 20 }}
                   whileInView={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
                   viewport={{ once: true }}
                   whileHover={{ y: -5, transition: { duration: 0.2 } }}
                 >
-                  <h3 className="text-xl font-semibold mb-4">{feature.title}</h3>
+                  <h3 className="text-xl font-semibold mb-4 text-white">{feature.title}</h3>
                   <p className="text-gray-400">{feature.description}</p>
                 </motion.div>
               ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Stats Section */}
+        <section className="py-20 px-6 md:px-12">
+          <div className="max-w-6xl mx-auto">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+              <motion.div
+                className="text-center"
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+              >
+                <div className="text-4xl font-bold text-white mb-2">95%</div>
+                <div className="text-gray-400">Detection Accuracy</div>
+              </motion.div>
+              <motion.div
+                className="text-center"
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.1 }}
+              >
+                <div className="text-4xl font-bold text-white mb-2">&lt;1s</div>
+                <div className="text-gray-400">Response Time</div>
+              </motion.div>
+              <motion.div
+                className="text-center"
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.2 }}
+              >
+                <div className="text-4xl font-bold text-white mb-2">24/7</div>
+                <div className="text-gray-400">Monitoring</div>
+              </motion.div>
+              <motion.div
+                className="text-center"
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: 0.3 }}
+              >
+                <div className="text-4xl font-bold text-white mb-2">5+</div>
+                <div className="text-gray-400">Detection Methods</div>
+              </motion.div>
             </div>
           </div>
         </section>

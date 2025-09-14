@@ -4,10 +4,9 @@ import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Navbar from './components/Navbar';
 import HomePage from './components/HomePage';
-import Dashboard from './components/Dashboard';
-import ThreatAnalysis from './components/ThreatAnalysis';
-import NetworkMonitor from './components/NetworkMonitor';
-import EnhancedNetworkMonitor from './components/EnhancedNetworkMonitor';
+import EnhancedDashboard from './components/EnhancedDashboard';
+import EnhancedDetectionModules from './components/EnhancedDetectionModules';
+import MalwareTestSuite from './components/MalwareTestSuite';
 import Auth from './components/Auth';
 import Footer from './components/Footer';
 import SimpleAlertsPage from './pages/SimpleAlertsPage';
@@ -16,9 +15,9 @@ const App = () => {
   return (
     <Router>
       <AuthProvider>
-        <div className="flex flex-col min-h-screen bg-[#0B0B0F]">
+        <div className="flex flex-col min-h-screen bg-gradient-to-br from-gray-900 via-red-900 to-gray-900">
           <Navbar />
-          <main className="flex-grow">
+          <main className="flex-grow px-4">
             <Routes>
               {/* Public routes */}
               <Route path="/auth" element={<Auth />} />
@@ -34,68 +33,21 @@ const App = () => {
               } />
               <Route path="/dashboard" element={
                 <ProtectedRoute>
-                  <Dashboard />
-                </ProtectedRoute>
-              } />
-              <Route path="/threats/:threatId" element={
-                <ProtectedRoute>
-                  <ThreatAnalysis />
+                  <EnhancedDashboard />
                 </ProtectedRoute>
               } />
               
-              {/* Use our enhanced network monitor instead of the original */}
-              <Route path="/network" element={
+              {/* Enhanced Detection Modules */}
+              <Route path="/detection-modules" element={
                 <ProtectedRoute>
-                  <EnhancedNetworkMonitor />
+                  <EnhancedDetectionModules />
                 </ProtectedRoute>
               } />
               
-              {/* Keep the original network monitor available at a different URL */}
-              <Route path="/network-old" element={
+              {/* Malware Test Suite */}
+              <Route path="/test-suite" element={
                 <ProtectedRoute>
-                  <NetworkMonitor />
-                </ProtectedRoute>
-              } />
-              
-              {/* Placeholder routes for navbar links */}
-              <Route path="/about" element={
-                <ProtectedRoute>
-                  <div className="min-h-screen pt-20 px-8 text-white">
-                    <h1 className="text-4xl font-bold mb-6">About Us</h1>
-                    <p>Learn more about our cybersecurity threat detection platform.</p>
-                  </div>
-                </ProtectedRoute>
-              } />
-              <Route path="/how-it-works" element={
-                <ProtectedRoute>
-                  <div className="min-h-screen pt-20 px-8 text-white">
-                    <h1 className="text-4xl font-bold mb-6">How It Works</h1>
-                    <p>Discover how our AI-powered threat detection system protects your network.</p>
-                  </div>
-                </ProtectedRoute>
-              } />
-              <Route path="/pricing" element={
-                <ProtectedRoute>
-                  <div className="min-h-screen pt-20 px-8 text-white">
-                    <h1 className="text-4xl font-bold mb-6">Pricing</h1>
-                    <p>View our flexible pricing plans for businesses of all sizes.</p>
-                  </div>
-                </ProtectedRoute>
-              } />
-              <Route path="/blog" element={
-                <ProtectedRoute>
-                  <div className="min-h-screen pt-20 px-8 text-white">
-                    <h1 className="text-4xl font-bold mb-6">Blog</h1>
-                    <p>Read our latest articles about cybersecurity trends and best practices.</p>
-                  </div>
-                </ProtectedRoute>
-              } />
-              <Route path="/contact" element={
-                <ProtectedRoute>
-                  <div className="min-h-screen pt-20 px-8 text-white">
-                    <h1 className="text-4xl font-bold mb-6">Contact Us</h1>
-                    <p>Get in touch with our team for support or inquiries.</p>
-                  </div>
+                  <MalwareTestSuite />
                 </ProtectedRoute>
               } />
               

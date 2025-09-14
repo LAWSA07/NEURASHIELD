@@ -25,7 +25,7 @@ class AlertService {
       }
       
       // Try to fetch from backend
-      const response = await fetch(`${this.baseUrl}/alerts`);
+      const response = await fetch(`${this.baseUrl}/api/alerts`);
       
       if (response.ok) {
         const alerts = await response.json();
@@ -153,7 +153,7 @@ class AlertService {
    */
   async getDashboardSummary() {
     try {
-      const response = await fetch(`${this.baseUrl}/dashboard/summary`);
+      const response = await fetch(`${this.baseUrl}/api/dashboard/summary`);
       
       if (response.ok) {
         return await response.json();
